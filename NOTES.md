@@ -692,5 +692,7 @@
   versioned symbol is imported.
 - stage-engine.sh: the toolchain's gconv is read-only; it is now made writable after the copy, so it gets stripped
   (bundled glibc 14 → 8.5 MB) and restaging can delete it.
-- fw-check: the UI now loads on webOS 3.4 → 26 (11/14 images). Not done: the kit's net.http still wants
-  libcurl.so.4 (webOS 1-4 name it libcurl.so.5).
+- fw-check: the UI now loads on webOS 3.4 → 26 (11/14 images). The kit's net.http wants libcurl.so.4 (webOS 1-4
+  name it libcurl.so.5), but Wren doesn't use net.http: the "net.http" capability line is only the kit's report.
+- C1 (webOS 6.5.3), 2026-11-15: "player APIs: Feed yes", media service up; Widevine H.264 1502 frames / 2 dropped,
+  Widevine VP9 1499 / 0 dropped on LG's pipeline; no Wayland errors. Released as v0.3.2-alpha.2.
