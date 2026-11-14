@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <wayland-client.h>
+#include "wayland_compat.h"
 
 #include "webos-surface-group-client-protocol.h"
 
@@ -30,7 +31,7 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
     struct wpeb_owner *o = data;
     (void)version;
     if (!strcmp(interface, "wl_webos_surface_group_compositor") && !o->groups)
-        o->groups = wl_registry_bind(registry, name, &wl_webos_surface_group_compositor_interface, 1);
+        o->groups = wpeb_registry_bind(registry, name, &wl_webos_surface_group_compositor_interface, 1);
 }
 static void registry_global_remove(void *data, struct wl_registry *registry, uint32_t name) { (void)data; (void)registry; (void)name; }
 static const struct wl_registry_listener registry_listener = { registry_global, registry_global_remove };

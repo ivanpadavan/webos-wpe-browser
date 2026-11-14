@@ -676,3 +676,21 @@
   libpulse is fine everywhere; bundled glibc 2.28 needs kernel ≥ 3.2 (memfd_create ≥ 3.17 is a risk). webOS 1–2 also lack
   the wayland read-queue API (`wl_display_prepare_read_queue`...) and have other Starfish `Load`/constructor
   signatures: not a target.
+
+## 2026-11-15 webOS 3.x: a tester's report (issue #2) and the fixes from it
+- satgit62 ran a repacked 0.3.1 on an OLED65B7 (webOS 3.9.0, kernel 4.4.3, Mali-T820, 2 GB): Debian armel glibc 2.28
+  flat in engine/lib, libcurl.so.4 + OpenSSL 1.1 in lib/, a Wayland shim. Pages were CPU-drawn only because 0.3.1
+  turned the GPU off whenever a bundled loader was used (0.3.2 keeps it). "Widevine L3" there can't be ours: 3.9 has
+  no libwidevine_ce_cdm_shared.
+- **Hardware video was off on webOS 3.x and 4.x:** MediaServer::start required NDL v2 (`NDL_DirectMediaLoad`, webOS 5+;
+  3.9/4.4 have the older NDL_DirectVideoOpen API), although LG's pipeline (Starfish) is the main path. It now starts
+  when either is there. On 3.x, `StarfishMediaAPIs::Feed` returns the old (COW) std::string, not the cxx11 one: the
+  lazy-bound direct call would have crashed at the first fed unit once the service started. Feed is now looked up
+  with dlsym in either ABI; the old string is read and freed with the TV's libstdc++ `_ZNSsD1Ev` (dlopen NOLOAD).
+- engine/webos-backend/wayland_compat.h: wl_registry_bind through `wl_proxy_marshal_constructor_versioned` found
+  with dlsym, else `wl_proxy_marshal_constructor` (libwayland < 1.10, webOS 3.x). build-webos-backend.sh fails if the
+  versioned symbol is imported.
+- stage-engine.sh: the toolchain's gconv is read-only; it is now made writable after the copy, so it gets stripped
+  (bundled glibc 14 → 8.5 MB) and restaging can delete it.
+- fw-check: the UI now loads on webOS 3.4 → 26 (11/14 images). Not done: the kit's net.http still wants
+  libcurl.so.4 (webOS 1-4 name it libcurl.so.5).

@@ -56,7 +56,16 @@ void MediaServer::set_foreground(bool foreground) { wnk::media::NdlBackend::set_
 
 bool MediaServer::start(const std::string &path, std::string *why) {
     if (running()) return true;
-    if (!wnk::media::NdlBackend::available(why)) return false;
+    // LG's media pipeline (StarfishMediaAPIs) is the main path; NDL's v2 API (webOS 5+) only a fallback. webOS 3.x
+    // and 4.x have the pipeline but an older NDL without NDL_DirectMediaLoad.
+    std::string ndl_why;
+    const bool ndl = wnk::media::NdlBackend::available(&ndl_why);
+    const bool lg = LgMediaPlayer::available();
+    if (!ndl && !lg) {
+        *why = "no LG media pipeline (" + LgMediaPlayer::unavailable_reason() + ") and " + ndl_why;
+        return false;
+    }
+    if (!ndl) WNK_LOGI(kCat, "NDL fallback unavailable (%s); LG media pipeline only", ndl_why.c_str());
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
     if (path.size() >= sizeof(addr.sun_path)) {

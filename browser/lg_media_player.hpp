@@ -26,7 +26,8 @@ public:
     LgMediaPlayer(const LgMediaPlayer &) = delete;
     LgMediaPlayer &operator=(const LgMediaPlayer &) = delete;
 
-    static bool available();  // false in host builds
+    static bool available();  // false in host builds, and on firmware without a usable Feed
+    static std::string unavailable_reason();
 
     // The playback's audio, when it goes to the same pipeline: LG then syncs the video to it. AAC frames carry ADTS
     // headers; Opus (experimental) comes as packets, with its OpusHead declared at Load (opusInfo).

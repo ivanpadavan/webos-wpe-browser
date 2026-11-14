@@ -37,15 +37,16 @@ ln -sf "$(readlink -f "$br_sysroot/usr/lib/libwpe-1.0.so")" "$out/wpe-link/libwp
 # The UI's half (window owner): only the TV's libwayland-client, dlopen()ed by the browser UI.
 "$ndk/bin/arm-webos-linux-gnueabi-gcc" -shared -fPIC -O2 -g0 -Wall -Wextra -Werror -std=gnu11 \
     -fvisibility=hidden -Wl,-soname,libwpeb-owner.so -Wl,--no-undefined -Wl,--as-needed \
-    -I"$src" -I"$out" -o "$out/libwpeb-owner.so" "$src/owner.c" "$out/webos-surface-group-protocol.c" -lwayland-client
+    -I"$src" -I"$out" -o "$out/libwpeb-owner.so" "$src/owner.c" "$out/webos-surface-group-protocol.c" -lwayland-client -ldl
 "$ndk/bin/arm-webos-linux-gnueabi-strip" --strip-unneeded "$out/libWPEBackend-webos.so" "$out/libwpeb-owner.so"
 cp "$src/wpebackend-webos.h" "$src/protocol.h" "$src/owner.h" "$out/"
 
-# Must not need anything newer than the TV's glibc 2.28 or its libwayland.
+# Must not need anything newer than the TV's glibc 2.28 or its libwayland (webOS 3.x: no
+# wl_proxy_marshal_constructor_versioned; wayland_compat.h looks it up at run time instead).
 for lib in libWPEBackend-webos.so libwpeb-owner.so; do
     echo "$lib:"
     "$ndk/bin/arm-webos-linux-gnueabi-readelf" -d "$out/$lib" | grep NEEDED
-    if "$ndk/bin/arm-webos-linux-gnueabi-objdump" -T "$out/$lib" | grep -E 'wl_proxy_marshal_flags|GLIBC_2\.(29|3[0-9])'; then
+    if "$ndk/bin/arm-webos-linux-gnueabi-objdump" -T "$out/$lib" | grep -E 'wl_proxy_marshal_flags|wl_proxy_marshal_constructor_versioned|GLIBC_2\.(29|3[0-9])'; then
         echo "$lib needs symbols the TV doesn't have" >&2
         exit 1
     fi

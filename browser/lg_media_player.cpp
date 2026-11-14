@@ -22,7 +22,8 @@ constexpr const char *kCat = "lgmedia";
 
 #if defined(WNK_SDL_WEBOS)
 // libplayerAPIs functions that not every firmware has, looked up at run time so the app still starts without them
-// (tools/fw-check.py): setHdrInfo and setAudioMute are missing before webOS 5, setVolume before webOS 3, and
+// (tools/fw-check.py): Feed's return type differs before webOS 4, setHdrInfo and setAudioMute are missing before
+// webOS 5, setVolume before webOS 3, and
 // smp::util::getMaxVideoResolution takes its codec by value up to webOS 25 but by const reference in webOS 26.
 // Member functions are called as functions taking `this` first (ARM EABI, non-virtual).
 struct OptionalPlayerApis {
@@ -33,7 +34,40 @@ struct OptionalPlayerApis {
     MaxResByValue max_res_by_value = nullptr;
     MaxResByRef max_res_by_ref = nullptr;
 
+    // Feed returns std::string: the C++11 string from webOS 4 on, the old reference-counted (COW) one on webOS 3.x
+    // (libstdc++ 6.0.19 without the cxx11 Feed). Both are class returns: the caller passes the result's address
+    // first (r0), then `this` and the JSON. The old string is a single pointer to its characters (NUL-terminated);
+    // it must be released by the TV's own libstdc++, whose empty-string storage it may point at.
+    struct OldString {
+        const char *chars;
+    };
+    using FeedCxx11 = std::string (*)(StarfishMediaAPIs *, const char *);
+    using FeedOld = void (*)(OldString *, StarfishMediaAPIs *, const char *);
+    using OldStringDtor = void (*)(OldString *);
+    FeedCxx11 feed_cxx11 = nullptr;
+    FeedOld feed_old = nullptr;
+    OldStringDtor old_string_dtor = nullptr;
+
+    bool can_feed() const { return feed_cxx11 || (feed_old && old_string_dtor); }
+
+    std::string feed(StarfishMediaAPIs *api, const char *json) const {
+        if (feed_cxx11) return feed_cxx11(api, json);
+        OldString reply{nullptr};
+        feed_old(&reply, api, json);
+        std::string out = reply.chars ? reply.chars : "";
+        old_string_dtor(&reply);
+        return out;
+    }
+
     OptionalPlayerApis() {
+        feed_cxx11 = find<FeedCxx11>("_ZN17StarfishMediaAPIs4FeedB5cxx11EPKc");
+        if (!feed_cxx11) {
+            feed_old = find<FeedOld>("_ZN17StarfishMediaAPIs4FeedEPKc");
+            // The TV's libstdc++ (loaded for libplayerAPIs); the app's own is linked in statically.
+            if (void *tv_cxx = dlopen("libstdc++.so.6", RTLD_LAZY | RTLD_NOLOAD))
+                old_string_dtor = reinterpret_cast<OldStringDtor>(dlsym(tv_cxx, "_ZNSsD1Ev"));
+        }
+        WNK_LOGI(kCat, "player APIs: Feed %s", feed_cxx11 ? "yes" : can_feed() ? "yes (old string ABI)" : feed_old ? "old string ABI, but no TV libstdc++ to free it" : "no");
         set_hdr_info = find<Message>("_ZN17StarfishMediaAPIs10setHdrInfoEPKc");
         set_audio_mute = find<Message>("_ZN17StarfishMediaAPIs12setAudioMuteEPKc");
         set_volume = find<Message>("_ZN17StarfishMediaAPIs9setVolumeEPKc");
@@ -115,9 +149,17 @@ LgMediaPlayer::~LgMediaPlayer() { unload(); }
 
 bool LgMediaPlayer::available() {
 #if defined(WNK_SDL_WEBOS)
-    return true;
+    return player_apis().can_feed();
 #else
     return false;
+#endif
+}
+
+std::string LgMediaPlayer::unavailable_reason() {
+#if defined(WNK_SDL_WEBOS)
+    return player_apis().can_feed() ? std::string() : "no usable StarfishMediaAPIs::Feed";
+#else
+    return "not a webOS build";
 #endif
 }
 
@@ -214,7 +256,7 @@ LgMediaPlayer::Feed LgMediaPlayer::feed(bool audio, const uint8_t *data, size_t 
     std::snprintf(json, sizeof json, "{\"bufferAddr\":\"%p\",\"bufferSize\":%u,\"pts\":%lld,\"esData\":%d}",
                   static_cast<const void *>(data), static_cast<unsigned>(size), static_cast<long long>(pts_us) * 1000,
                   audio ? 2 : 1);
-    const std::string reply = api_->Feed(json);
+    const std::string reply = player_apis().feed(api_, json);
     const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                std::chrono::steady_clock::now().time_since_epoch()).count();
     if (now_ms - stats_at_ms_ >= 5000) {

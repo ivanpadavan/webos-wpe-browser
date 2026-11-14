@@ -58,6 +58,8 @@ cmake -S "$SRC/engine" -B "$ENGINE_BUILD" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$BR/host/share/buildroot/toolchainfile.cmake" -DCMAKE_BUILD_TYPE=Release >/dev/null
 cmake --build "$ENGINE_BUILD"
 
+# A copy of read-only toolchain files (gconv) would block the rm.
+[ -d "$OUT" ] && chmod -R u+w "$OUT"
 rm -rf "$OUT"
 mkdir -p "$OUT/lib/gio/modules" "$OUT/libexec" "$OUT/etc/fonts" "$OUT/etc/ssl/certs" "$OUT/share"
 cp "$ENGINE_BUILD/wpe-engine" "$OUT/"
@@ -186,6 +188,7 @@ if [ "$HF" = yes ]; then
     gconv=$(ls -d "$TARGET"/usr/lib/gconv 2>/dev/null || true)
     [ -n "$gconv" ] || { echo "missing usr/lib/gconv (BR2_TOOLCHAIN_GLIBC_GCONV_LIBS_COPY)" >&2; exit 1; }
     cp -r "$gconv" "$OUT/lib/gconv"
+    chmod -R u+w "$OUT/lib/gconv"
     PATCHELF=$BR/host/bin/patchelf
     for exe in "$OUT/wpe-engine" "$OUT"/libexec/*; do
         "$READELF" -l "$exe" 2>/dev/null | grep -q 'Requesting program interpreter' || continue
@@ -201,6 +204,7 @@ if [ "$STAGE_GLIBC" = 1 ]; then
     done
     [ -d "$TOOLCHAIN_GCONV" ] || { echo "missing $TOOLCHAIN_GCONV (gconv modules)" >&2; exit 1; }
     cp -r "$TOOLCHAIN_GCONV" "$OUT/lib/glibc/gconv"
+    chmod -R u+w "$OUT/lib/glibc/gconv"  # read-only in the toolchain: strip and later restages must write
     PATCHELF=$BR/host/bin/patchelf
     for exe in "$OUT/wpe-engine" "$OUT"/libexec/*; do
         "$READELF" -l "$exe" 2>/dev/null | grep -q 'Requesting program interpreter' || continue
