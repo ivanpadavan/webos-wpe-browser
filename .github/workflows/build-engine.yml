@@ -1,0 +1,213 @@
+name: Build WPE engine
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-engine.yml'
+      - 'tools/ci/**'
+      - 'toolchain/**'
+      - 'buildroot-external/**'
+      - 'engine/**'
+      - 'common/**'
+      - 'drm/**'
+      - 'tools/stage-engine.sh'
+      - 'LICENSE'
+  pull_request:
+    paths:
+      - '.github/workflows/build-engine.yml'
+      - 'tools/ci/**'
+      - 'toolchain/**'
+      - 'buildroot-external/**'
+      - 'engine/**'
+      - 'common/**'
+      - 'drm/**'
+      - 'tools/stage-engine.sh'
+      - 'LICENSE'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wpe-engine-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  toolchain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    outputs:
+      cache-key: ${{ steps.key.outputs.value }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Prepare runner
+        run: bash tools/ci/prepare.sh
+      - name: Compute input key
+        id: key
+        env:
+          INPUT_KEY: ctng-ubuntu24-x64-v1-${{ hashFiles('toolchain/ct-ng.defconfig', 'tools/ci/toolchain.sh', 'tools/ci/prepare.sh') }}
+        run: echo "value=$INPUT_KEY" >> "$GITHUB_OUTPUT"
+      - name: Restore completed toolchain build
+        id: cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /build/artifacts/toolchain.tar.zst
+          key: ${{ steps.key.outputs.value }}
+      - name: Record inputs
+        env:
+          INPUT_KEY: ${{ steps.key.outputs.value }}
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          printf 'Requested commit: %s\nInput key: %s\nCache hit: %s\n' \
+            "$GITHUB_SHA" "$INPUT_KEY" "$CACHE_HIT" | tee /build/logs/input-keys.txt
+          cat /build/logs/input-keys.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Build toolchain
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash tools/ci/toolchain.sh
+      - name: Upload toolchain
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: toolchain
+          path: |
+            /build/artifacts/toolchain.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Upload toolchain logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: toolchain-logs
+          path: |
+            /build/logs/
+            /build/ctng-config/build.log
+          retention-days: 7
+
+  webkit:
+    needs: toolchain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    outputs:
+      cache-key: ${{ steps.key.outputs.value }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Prepare runner
+        run: bash tools/ci/prepare.sh
+      - name: Compute input key
+        id: key
+        env:
+          INPUT_KEY: webkit-v1-${{ needs.toolchain.outputs.cache-key }}-${{ hashFiles('buildroot-external/**', 'drm/**', 'toolchain/extra-headers/**', 'tools/ci/webkit.sh') }}
+        run: echo "value=$INPUT_KEY" >> "$GITHUB_OUTPUT"
+      - name: Restore completed webkit build
+        id: cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /build/artifacts/webkit-sdk.tar.zst
+          key: ${{ steps.key.outputs.value }}
+      - name: Download toolchain
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: toolchain
+          path: /build/artifacts
+      - name: Record inputs
+        env:
+          INPUT_KEY: ${{ steps.key.outputs.value }}
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          printf 'Requested commit: %s\nInput key: %s\nCache hit: %s\n' \
+            "$GITHUB_SHA" "$INPUT_KEY" "$CACHE_HIT" | tee /build/logs/input-keys.txt
+          cat /build/logs/input-keys.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Build webkit
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash tools/ci/webkit.sh
+      - name: Upload webkit
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: webkit
+          path: |
+            /build/artifacts/webkit-sdk.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Upload webkit logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: webkit-logs
+          path: |
+            /build/logs/
+          retention-days: 7
+
+  engine:
+    needs: [toolchain, webkit]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      cache-key: ${{ steps.key.outputs.value }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Prepare runner
+        run: bash tools/ci/prepare.sh
+      - name: Compute input key
+        id: key
+        env:
+          INPUT_KEY: engine-v1-${{ needs.webkit.outputs.cache-key }}-${{ hashFiles('engine/**', 'common/**', 'tools/stage-engine.sh', 'tools/ci/stage.sh', 'LICENSE') }}
+        run: echo "value=$INPUT_KEY" >> "$GITHUB_OUTPUT"
+      - name: Restore completed engine build
+        id: cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /build/artifacts/wpe-engine-softfp.tar.zst
+          key: ${{ steps.key.outputs.value }}
+      - name: Download toolchain
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: toolchain
+          path: /build/artifacts
+      - name: Download webkit
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: webkit
+          path: /build/artifacts
+      - name: Record inputs
+        env:
+          INPUT_KEY: ${{ steps.key.outputs.value }}
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          printf 'Requested commit: %s\nInput key: %s\nCache hit: %s\n' \
+            "$GITHUB_SHA" "$INPUT_KEY" "$CACHE_HIT" | tee /build/logs/input-keys.txt
+          cat /build/logs/input-keys.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Build engine
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash tools/ci/stage.sh
+      - name: Checksum runtime
+        run: |
+          cd /build/artifacts
+          sha256sum wpe-engine-softfp.tar.zst > SHA256SUMS
+      - name: Upload engine
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: engine
+          path: |
+            /build/artifacts/wpe-engine-softfp.tar.zst
+            /build/artifacts/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - name: Upload engine logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: engine-logs
+          path: |
+            /build/logs/
+          retention-days: 7
